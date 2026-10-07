@@ -5,6 +5,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# pdf2image shells out to Poppler's pdftoppm to turn PDF pages into images.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

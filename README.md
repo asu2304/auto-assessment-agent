@@ -48,35 +48,71 @@ Identity for this is the signed-in Google account (proven via a server-issued, H
 
 ## Quick start
 
+### Prerequisites
+
+- **Python 3.10+** (the Docker image uses 3.11)
+- **Node.js 18+** and npm, for the frontend
+- **Poppler**, which converts PDF pages to images for OCR. Without it, PDF uploads fail; image, text, and DOCX uploads still work.
+
 ```bash
-git clone https://github.com/aayushmanda/da7016_project.git
-cd da7016_project
+brew install poppler               # macOS
+sudo apt-get install poppler-utils # Debian/Ubuntu
+```
+
+On Windows, install a Poppler build and add its `bin` folder to `PATH`. Once the backend is running, `GET /api/system/check` reports whether Poppler was found.
+
+### Install
+
+```bash
+git clone https://github.com/asu2304/auto-assessment-agent.git
+cd auto-assessment-agent
 
 python3 -m venv .venv
 source .venv/bin/activate          # .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 ```
 
-Create `.env` in the repo root:
+### Configure
+
+Copy the template and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+- **Gemini key** — create one at [Google AI Studio](https://aistudio.google.com/apikey) and set `GEMINI_API_KEY`.
+- **Google sign-in** — in the [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create an **OAuth client ID** of type **Web application**. Under **Authorized JavaScript origins** add `http://localhost` and `http://localhost:5173` (plus `http://localhost:8080` if you use Docker). Set the client ID as `GOOGLE_CLIENT_ID`. No client secret is needed.
+- **Session secret** — generate one with `python3 -c "import secrets; print(secrets.token_hex(32))"` and set `SESSION_SECRET`.
 
 | Variable | Required | Purpose |
 |---|---|---|
-| `GEMINI_API_KEY` | yes | grading/chat |
+| `GEMINI_API_KEY` | yes | transcription, grading, and chat |
 | `GOOGLE_CLIENT_ID` | yes | Google sign-in |
 | `SESSION_SECRET` | recommended | signs session tokens; if unset, a random one is generated per process start and everyone is signed out on restart |
 | `GOOGLE_ALLOWED_DOMAINS` | no | comma-separated email domains allowed to sign in; unset = allow all |
-| `BODHAN_API_KEY` | yes | enables `indic-speak` text-to-speech in Agent Chat through Bodhan |
+| `AUTH_COOKIE_SECURE` | no | set to `true` when serving over HTTPS so the session cookie is HTTPS-only |
+| `BODHAN_API_KEY` | for voice | enables `indic-speak` text-to-speech in Agent Chat through Bodhan; everything else works without it |
 | `BODHAN_TTS_BASE_URL` | no | Bodhan OpenAI-compatible TTS base URL (default `https://api.bodhan.ai/v1`) |
 | `TTS_MODEL` | no | text-to-speech model name (default `indic-speak`) |
 | `USE_BODHAN_OCR` | no | set to `true` only if you have a separate OCR-capable Bodhan key; otherwise Gemini vision OCR is used |
 | `BODHAN_OCR_API_KEY` | no | Bodhan OCR key used only when `USE_BODHAN_OCR=true` |
 | `BODHAN_OCR_MODEL` | no | override the Bodhan OCR model when `USE_BODHAN_OCR=true` (default `indic-ocr`) |
-| `GEMINI_GRADING_MODEL` / `GEMINI_CHAT_MODEL` | no | override the default model per stage |
+| `GEMINI_TRANSCRIPTION_MODEL` / `GEMINI_GRADING_MODEL` / `GEMINI_CHAT_MODEL` | no | override the default model per stage |
+| `PDF_OCR_DPI` | no | resolution used when converting PDF pages to images (default `200`) |
+| `DB_PATH` | no | where the SQLite history database is stored (default: next to `web.py`; `/data/assessment_history.db` in Docker) |
 | `BATCH_CONCURRENCY` | no | concurrent Gemini calls in a batch grading run (default `3`) |
 | `MAX_BATCH_SIZE` | no | max students per batch (default `25`) |
 | `MAX_IMAGES_PER_REQUEST` | no | max image/PDF pages per single upload (default `10`; PDFs are converted to page images for OCR) |
 
-Run both servers (two terminals):
+### Run
+
+The quickest way is the launcher script, which loads `.env`, installs frontend dependencies on first run, and starts both servers:
+
+```bash
+./start.sh
+```
+
+Or run the two servers yourself (two terminals, with the virtual environment active for the backend):
 
 ```bash
 # backend
@@ -88,9 +124,15 @@ cd auto_assessment/frontend
 npm install && npm run dev
 ```
 
-Frontend: `http://localhost:5173` (proxies `/api` to the backend) · Backend docs: `http://127.0.0.1:8000/docs`
+Frontend: `http://localhost:5173` (proxies `/api` and `/ws` to the backend) · Backend docs: `http://127.0.0.1:8000/docs`
 
-Or use `./start.sh` from the repo root to launch both together.
+### Tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests cover document parsing, report validation, and the config endpoints. They make no model calls, so no API keys are needed.
 
 ### Docker
 
@@ -110,6 +152,10 @@ Frontend: `http://localhost:8080` (nginx, proxies `/api` and `/ws` to the backen
 - **History** — reopen or delete past assessments without re-uploading. The 5 most recent assessment *runs* are kept per login (a batch counts as one run, not one per student).
 - **Models** — live view of which model powers each pipeline stage.
 
+| Upload | Score Feed | Agent Chat |
+|---|---|---|
+| ![Upload](images/upload.png) | ![Score Feed](images/score_feed.png) | ![Agent Chat](images/agent_chat.png) |
+
 ---
 
 ## API
@@ -125,11 +171,14 @@ Frontend: `http://localhost:8080` (nginx, proxies `/api` and `/ws` to the backen
 | `POST /api/regrade` | request re-evaluation of a specific question |
 | `POST /api/chat` | assessment-grounded chat |
 | `POST /api/voice/synthesize` | text-to-speech for chat/feedback (requires `BODHAN_API_KEY`) |
+| `GET /api/system/check` | reports whether Poppler and the Bodhan key are available |
+
+Replace the file paths with your own rubric and answer sheet:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/api/assess" \
-  -F "rubric_file=@examples/rubric.pdf" \
-  -F "answer_file=@examples/student_answer.pdf"
+  -F "rubric_file=@path/to/rubric.pdf" \
+  -F "answer_file=@path/to/student_answer.pdf"
 ```
 
 ```bash
@@ -158,7 +207,7 @@ curl -X POST "http://127.0.0.1:8000/api/regrade" \
 ## Repository structure
 
 ```text
-da7016_project/
+auto-assessment-agent/
 ├── auto_assessment/
 │   ├── auto_assessment/
 │   │   ├── agent.py            # multi-agent pipeline + Pydantic contracts
@@ -170,10 +219,13 @@ da7016_project/
 │       ├── package.json
 │       ├── Dockerfile          # build → nginx static + /api, /ws proxy
 │       └── nginx.conf
+├── tests/test_core.py          # unit tests (no API keys needed)
+├── images/                     # README screenshots
 ├── requirements.txt
-├── Dockerfile                  # backend image
+├── .env.example                # template for .env
+├── Dockerfile                  # backend image (includes Poppler)
 ├── docker-compose.yml
-├── start.sh
+├── start.sh                    # launches backend + frontend together
 └── LICENSE
 ```
 
