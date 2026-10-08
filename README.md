@@ -4,6 +4,8 @@ A multi-agent grading system that evaluates handwritten and typed student answer
 
 Handles PDFs, images, plain text, and DOCX. Grades one submission or a whole batch against the same rubric.
 
+📄 **[Project report (PDF)](docs/Auto_Assessment_Agent_Report.pdf)** — design, agents, memory, safety, and limitations.
+
 <video src="https://github.com/user-attachments/assets/8414c893-983e-415e-8052-bd8e116cb301" controls width="100%"></video>
 
 
